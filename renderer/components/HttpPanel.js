@@ -4,9 +4,27 @@ export default class HttpPanel {
     constructor() {
         this.buildUI();
         this.paramRows = [];
+        this.history = [];
     }
 
     buildUI() {
+        this.container = document.createElement("div");
+        this.container.className = "http-container";
+
+        this.sidebar = document.createElement("div");
+        this.sidebar.className = "history-sidebar";
+
+        const sidebarTitle = document.createElement("div");
+        sidebarTitle.className = "sidebar-title";
+        sidebarTitle.textContent = "History";
+        this.sidebar.appendChild(sidebarTitle);
+
+        this.historyList = document.createElement("div");
+        this.historyList.className = "history-list";
+        this.sidebar.appendChild(this.historyList);
+
+        this.container.appendChild(this.sidebar);
+
         this.element = document.createElement("div");
         this.element.className = "panel";
 
@@ -41,7 +59,6 @@ export default class HttpPanel {
         this.hostInput = hostField.querySelector("input");
         this.pathInput = pathField.querySelector("input");
 
-        // Query Parameters
         const paramsLabel = document.createElement("div");
         paramsLabel.className = "section-label";
         paramsLabel.textContent = "Query Parameters";
@@ -75,7 +92,6 @@ export default class HttpPanel {
         this.sendBtn.addEventListener("click", () => this.send());
         this.element.appendChild(this.sendBtn);
 
-        // Response Area
         const responseArea = document.createElement("div");
         responseArea.className = "response-area";
 
@@ -101,6 +117,11 @@ export default class HttpPanel {
                 this.send();
             }
         });
+
+        this.container.appendChild(this.element);
+
+        this.panelElement = this.element;
+        this.element = this.container;
     }
 
     _createField(labelText, tag, defaultValue, options, type) {
@@ -179,6 +200,95 @@ export default class HttpPanel {
         return params;
     }
 
+    _clearParams() {
+        for (const row of this.paramRows) {
+            row.remove();
+        }
+        this.paramRows = [];
+    }
+
+    _setParams(params) {
+        this._clearParams();
+        for (const [key, val] of Object.entries(params)) {
+            this._addParamRow(key, val);
+        }
+    }
+
+    _addHistoryEntry(config) {
+        const queryString = Object.entries(config.query || {})
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([k, v]) => `${k}=${v}`)
+            .join('&');
+        const key = `${config.method}|${config.protocol}://${config.host}:${config.port}${config.path}?${queryString}`;
+
+        const existingIndex = this.history.findIndex(entry => entry._key === key);
+        if (existingIndex !== -1) {
+            this.history.splice(existingIndex, 1);
+        }
+
+        const entry = { ...config, _key: key };
+        this.history.unshift(entry);
+
+        this._renderHistory();
+    }
+
+    _removeHistoryEntry(index) {
+        this.history.splice(index, 1);
+        this._renderHistory();
+    }
+
+    _renderHistory() {
+        this.historyList.innerHTML = '';
+        if (this.history.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'history-empty';
+            empty.textContent = 'No requests yet';
+            this.historyList.appendChild(empty);
+            return;
+        }
+
+        for (let i = 0; i < this.history.length; i++) {
+            const entry = this.history[i];
+            const item = document.createElement('div');
+            item.className = 'history-item';
+
+            const content = document.createElement('div');
+            content.className = 'history-content';
+            content.textContent = `${entry.method} ${entry.protocol}://${entry.host}:${entry.port}${entry.path}`;
+            content.title = `Click to restore this request`;
+            content.addEventListener('click', () => this._restoreFromHistory(entry));
+
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'history-remove';
+            removeBtn.textContent = '×';
+            removeBtn.title = 'Remove from history';
+            removeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._removeHistoryEntry(i);
+            });
+
+            item.append(content, removeBtn);
+            this.historyList.appendChild(item);
+        }
+    }
+
+    _restoreFromHistory(entry) {
+        this.methodSelect.value = entry.method;
+        this.protoSelect.value = entry.protocol;
+        this.hostInput.value = `${entry.host}:${entry.port}`;
+        this.pathInput.value = entry.path;
+
+        this._setParams(entry.query || {});
+
+        if (entry.body && typeof entry.body === 'object') {
+            this.bodyTextarea.value = JSON.stringify(entry.body, null, 2);
+        } else if (entry.body) {
+            this.bodyTextarea.value = String(entry.body);
+        } else {
+            this.bodyTextarea.value = '';
+        }
+    }
+
     async send() {
         const protocol = this.protoSelect.value;
         const method = this.methodSelect.value;
@@ -212,6 +322,9 @@ export default class HttpPanel {
                 return;
             }
         }
+
+        const historyEntry = { method, protocol, host, port, path, query, body };
+        this._addHistoryEntry(historyEntry);
 
         this.sendBtn.disabled = true;
         this.sendBtn.textContent = "Sending…";
